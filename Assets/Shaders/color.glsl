@@ -1,0 +1,28 @@
+
+#shader vertex
+#version 440 core
+
+
+layout(location = 0) in vec4 position;
+
+uniform mat4 u_mpv_mat;
+
+
+void main() {
+    itpl_uv = uv;
+    gl_Position = u_mpv_mat * position;
+}
+
+
+
+#shader fragment
+#version 440 core
+
+
+layout(location = 0) out vec4 color;
+
+uniform vec4 u_color;
+
+void main() {
+    color = u_color;
+}
