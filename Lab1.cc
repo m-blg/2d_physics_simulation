@@ -16,8 +16,11 @@
 
 using namespace cp;
 
-bool is_physics_updated = true;
-bool are_colliders_rendered = true;
+struct {
+    bool is_physics_updated = true;
+    bool are_colliders_rendered = true;
+    vec4f clear_color = {0, 0.2, 0.2, 1};
+} Sandbox_Settings;
 
 sbuff<vec3f, 4> quad_vrt_positions = {{
     { -0.5f, -0.5f, 0 },
@@ -52,28 +55,14 @@ u32 mvp_mat_loc;
 u32 stream_vao;
 u32 stream_vbo;
 
-struct Physics_Data {
-    f32 mass;
-    vec2f velocity;
-    bool is_static;
-};
-
-struct Physics_Object {
-    const char* name;
-    Transform transform;
-    Collider collider;
-    Physics_Data physics_data;
-
-    Material_Sprite2D material;
-};
-
-darr<Physics_Object> quads;
-
 namespace Editor {
     Physics_Object* selected_object = null;
+
+    void place_object();
 }
 
 namespace Builder {
+
     Physics_Object* selected_object = null;
 
     sarr<Physics_Object, 2> objects = {{
@@ -119,11 +108,11 @@ Camera camera = {
 
 Camera* main_camera;
 
-vec4f clear_color = {0, 0.2, 0.2, 1};
 
 void save_physics_objects(const char* file_name) {
     FILE* file = fopen(file_name, "wb");
-    fwrite(&clear_color, sizeof(vec4f), 1, file);
+    fwrite(&Sandbox_Settings, sizeof(Sandbox_Settings), 1, file);
+    fwrite(&camera, sizeof(Camera), 1, file);
     fwrite(&quads.len, sizeof(u32), 1, file);
     fwrite(quads.buffer, sizeof(Physics_Object), quads.len, file);
     fclose(file);
@@ -134,7 +123,8 @@ void load_physics_objects(const char* file_name) {
     if (file == null) 
         return;
 
-    fread(&clear_color, sizeof(vec4f), 1, file);
+    fread(&Sandbox_Settings, sizeof(Sandbox_Settings), 1, file);
+    fread(&camera, sizeof(Camera), 1, file);
     u32 len;
     fread(&len, sizeof(u32), 1, file);
     quads.init(len);
@@ -175,8 +165,6 @@ void render_colliders() {
     i32 texture_slot = 1;
 
     set_uniform(&Assets::shaders[0], 1, texture_slot);
-    vec4f color = { 1, 1, 1, 0.5f };
-    set_uniform(&Assets::shaders[0], 2, color);
 
 
     mat4f vp_m = proj_xy_orth_matrix(window_size, main_camera->pixels_per_unit, {-1, 30}) * view_matrix(&main_camera->transform);
@@ -204,159 +192,46 @@ void render_colliders() {
         }
 
         set_uniform(&Assets::shaders[0], 0, mvp_m);
+        vec4f color = ( it == Editor::selected_object ? vec4f{ 1, 1, 1, 0.8f } : vec4f{ 1, 1, 1, 0.5f } );
+        set_uniform(&Assets::shaders[0], 2, color);
 
         glDrawElements(GL_TRIANGLES, cap(&quad_mesh.index_buffer) * 3, GL_UNSIGNED_INT, null);
     }
 }
 
-Collider world_space_collider(Physics_Object *po) {
-    Collider c;
-    c.type = po->collider.type;
+void Editor::place_object() {
+    vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
+    Editor::selected_object = is_over(cursor_world_pos);
+    if (Editor::selected_object != null) return;
 
-    mat4f model_m1 = model_matrix(&po->transform);
-    switch (po->collider.type) {
-        case Collider_Type::Box_Collider2D: 
-        {
-            Box_Collider2D& po_col = po->collider.box_collider2d;
+    if (Builder::selected_object != null) {
+        Physics_Object obj = *Builder::selected_object;
+        obj.transform.position = {cursor_world_pos.x, cursor_world_pos.y, 0};
 
-            c.box_collider2d = { (vec2f)(model_m1 * vec4f(po_col.lb, 0, 1)), 
-                (vec2f)(model_m1 * vec4f(po_col.rt, 0, 1)) }; 
-        } break;
-        case Collider_Type::Sphere_Collider2D:
-        {
-            Sphere_Collider2D& po_col = po->collider.sphere_collider2d;
-
-            c.sphere_collider2d = { (vec2f)(model_m1 * vec4f(po_col.origin, 0, 1)), po_col.radius * max(po->transform.scale.x, po->transform.scale.y) };
-            
-        } break;
-    }
-
-    return c;
-}
-
-void resolve_collision(Physics_Object* obj1, Physics_Object *obj2, Box_Collider2D *c1, Box_Collider2D *c2) {
-    Physics_Data& data1 = obj1->physics_data;
-    Physics_Data& data2 = obj2->physics_data;
-    if (!data1.is_static && !data2.is_static) {
-        vec2f new_velocity1 = ( data1.velocity * (data1.mass - data2.mass) + 2 * data2.mass * data2.velocity ) / (data1.mass + data2.mass);
-        vec2f new_velocity2 = ( data2.velocity * (data2.mass - data1.mass) + 2 * data1.mass * data1.velocity ) / (data1.mass + data2.mass);
-
-
-        data1.velocity = new_velocity1;
-        data2.velocity = new_velocity2;
-    }
-}
-void resolve_collision(Physics_Object* obj1, Physics_Object *obj2, Sphere_Collider2D *c1, Sphere_Collider2D *c2) {
-    Physics_Data& data1 = obj1->physics_data;
-    Physics_Data& data2 = obj2->physics_data;
-    if (!data1.is_static && !data2.is_static) {
-        vec2f delta = c1->origin - c2->origin;
-        f32 sm_delta = delta.x * delta.x + delta.y * delta.y;
-        vec2f new_velocity1 = data1.velocity - 2 * (data2.mass / (data1.mass + data2.mass)) *  
-            dot(data1.velocity - data2.velocity, delta) * delta / sm_delta;
-
-        delta = -delta;
-        vec2f new_velocity2 = data2.velocity - 2 * (data1.mass / (data1.mass + data2.mass)) *  
-            dot(data2.velocity - data1.velocity, delta) * delta / sm_delta;
-
-        data1.velocity = new_velocity1;
-        data2.velocity = new_velocity2;
+        dpush(&quads, obj);
     }
 }
 
-vec2f min_vec(vec2f v1, vec2f v2) {
-    return (magnitude(v1) < magnitude(v2) ? v1 : v2);
-}
-
-vec2f max_vec(vec2f v1, vec2f v2) {
-    return (magnitude(v1) > magnitude(v2) ? v1 : v2);
-}
-
-void resolve_collision(Physics_Object* b, Physics_Object *s, Box_Collider2D *c1, Sphere_Collider2D *c2) {
-    vec2f lb = c1->lb;
-    vec2f rt = c1->rt;
-    vec2f lt = { lb.x, rt.y };
-    vec2f rb = { rt.x, lb.y };
-
-    // cld - closest point
-    vec2f delta1 = closest_point_segment(lb, lt, c2->origin) - c2->origin;
-    vec2f delta2 = closest_point_segment(rb, rt, c2->origin) - c2->origin;
-    vec2f delta3 = closest_point_segment(lb, rb, c2->origin) - c2->origin;
-    vec2f delta4 = closest_point_segment(lt, rt, c2->origin) - c2->origin;
-
-    vec2f delta = min_vec(min_vec(delta1, delta2), min_vec(delta3, delta4));
-
-    Physics_Data& data1 = b->physics_data;
-    Physics_Data& data2 = s->physics_data;
-    if (!data1.is_static && !data2.is_static) {
-        f32 sm_delta = delta.x * delta.x + delta.y * delta.y;
-        vec2f new_velocity1 = data1.velocity - 2 * (data2.mass / (data1.mass + data2.mass)) *  
-            dot(data1.velocity - data2.velocity, delta) * delta / sm_delta;
-
-        delta = -delta;
-        vec2f new_velocity2 = data2.velocity - 2 * (data1.mass / (data1.mass + data2.mass)) *  
-            dot(data2.velocity - data1.velocity, delta) * delta / sm_delta;
-
-        data1.velocity = new_velocity1;
-        data2.velocity = new_velocity2;
-    }
-}
-
-void resolve_collision(Physics_Object *obj1, Physics_Object *obj2, Sphere_Collider2D *c1, Box_Collider2D *c2) {
-    resolve_collision(obj2, obj1, c2, c1);
-}
-
-void(*resolve_collision_matrix[(u32)Collider_Type::count][(u32)Collider_Type::count])(Physics_Object*, Physics_Object*, Collider*, Collider*);
-
-void on_collision(Physics_Object* obj1, Physics_Object *obj2, Collider *wc1, Collider *wc2) {
-    if (obj1->collider.type == Collider_Type::Box_Collider2D) {
-        if (obj2->collider.type == Collider_Type::Box_Collider2D) {
-            resolve_collision(obj1, obj2, &wc1->box_collider2d, &wc2->box_collider2d);
-        } else if (obj2->collider.type == Collider_Type::Sphere_Collider2D) {
-            resolve_collision(obj1, obj2, &wc1->box_collider2d, &wc2->sphere_collider2d);
-        }
-    } else if (obj1->collider.type == Collider_Type::Sphere_Collider2D) {
-        if (obj2->collider.type == Collider_Type::Box_Collider2D) {
-            resolve_collision(obj1, obj2, &wc1->sphere_collider2d, &wc2->box_collider2d);
-        } else if (obj2->collider.type == Collider_Type::Sphere_Collider2D) {
-            resolve_collision(obj1, obj2, &wc1->sphere_collider2d, &wc2->sphere_collider2d);
-        }
-    }
-}
-
-void physics_update() {
+void explosion_effect() {
+    const f32 accel_radius = 10;
+    const f32 accel_magnitude = 3000;
+    vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
     for (auto it = begin(&quads); it != end(&quads); it++) {
-        it->transform.position += vec3f(it->physics_data.velocity, 0) * 0.1f * GTime::fixed_dt;
-    }
-    for (auto it = begin(&quads); it != end(&quads); it++) {
-        //mat4f model_m1 = model_matrix(&it->transform);
-        //Box_Collider2D c1 = { (vec2f)(model_m1 * vec4f(it->collider.lb, 0, 1)), (vec2f)(model_m1 * vec4f(it->collider.rt, 0, 1)) }; 
-        auto c1 = world_space_collider(it);
-        for (auto it2 = it+1; it2 != end(&quads); it2++) {
-            auto c2 = world_space_collider(it2);
-            if (do_collide(&c1, &c2)) {
-                //it->velocity = -1.0f * it->velocity;
-                //it2->velocity = -1.0f *it2->velocity;
-                on_collision(it, it2, &c1, &c2);
-            }
+        if (it->physics_data.is_static)
+            continue;
+
+        vec2f center;
+        if (it->collider.type == Collider_Type::Box_Collider2D) {
+            center = centerof(world_space_collider_b(it));                    
+        } else {
+            center = world_space_collider_s(it).origin;  
+        }
+        vec2f dir = center - cursor_world_pos;
+        if (magnitude(dir) < accel_radius) {
+            it->physics_data.velocity += dir / magnitude(dir) * accel_magnitude * GTime::dt;
         }
     }
 }
-
-Physics_Object* is_over(vec2f p) {
-    f32 depth = INT_MIN;
-    Physics_Object* po = null;
-    for (auto it = begin(&quads); it != end(&quads); it++) {
-        Collider c = world_space_collider(it);
-        // vec2f local_p = p - vec2f(it->transform.position.x, it->transform.position.y);
-        if (is_contained(&c, p) && it->transform.position.z > depth) {
-            po = it;
-            depth = it->transform.position.z;
-        }
-    }
-    return po;
-}
-
 
 
 void game_init() {
@@ -412,7 +287,7 @@ void game_init() {
 
     load_physics_objects("Saves/save.bin");
 
-    GTime::fixed_dt = 1.0f / 180;
+    GTime::fixed_dt = 1.0f / 360;
 }
 
 void game_shut() {
@@ -422,7 +297,7 @@ void game_shut() {
 
 void game_update() {
 
-    glClearColor(clear_color.r, clear_color.g, clear_color.b, clear_color.a);
+    glClearColor(Sandbox_Settings.clear_color.r, Sandbox_Settings.clear_color.g, Sandbox_Settings.clear_color.b, Sandbox_Settings.clear_color.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
@@ -446,16 +321,10 @@ void game_update() {
     ImGuiIO& gui_io = ImGui::GetIO();
     if (!gui_io.WantCaptureMouse) {
         if (Input::is_mouse_button_down(0)) {
-            vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
-            Editor::selected_object = is_over(cursor_world_pos);
-            if (Editor::selected_object != null) return;
-
-            if (Builder::selected_object != null) {
-                Physics_Object obj = *Builder::selected_object;
-                obj.transform.position = {cursor_world_pos.x, cursor_world_pos.y, 0};
- 
-                dpush(&quads, obj);
-            }
+            Editor::place_object();
+        }
+        if (Input::is_mouse_button_down(2)) {
+            explosion_effect();
         }
 
         if (main_camera != null) {
@@ -466,13 +335,13 @@ void game_update() {
     }
 
     render_quads();
-    if (are_colliders_rendered)
+    if (Sandbox_Settings.are_colliders_rendered)
         render_colliders();
 
     static f32 cur_dt = 0;
     cur_dt += GTime::dt;
     for (; cur_dt >= GTime::fixed_dt; cur_dt -= GTime::fixed_dt) {
-        if (is_physics_updated)
+        if (Sandbox_Settings.is_physics_updated)
             physics_update();  
     }
 
@@ -489,14 +358,14 @@ void game_update() {
 #include "gpu_graphics/import/imgui/imgui_demo.cpp"
 void draw_gui() {
     ImGui::Begin("Properties");
-    ImGui::ShowDemoWindow();
+    // ImGui::ShowDemoWindow();
     ImGui::Text("fps: %f, dt: %f", 1 / GTime::dt, GTime::dt);
 
-    ImGui::Checkbox("Update Physics", &is_physics_updated);
-    ImGui::Checkbox("Render Colliders", &are_colliders_rendered);
+    ImGui::Checkbox("Update Physics", &Sandbox_Settings.is_physics_updated);
+    ImGui::Checkbox("Render Colliders", &Sandbox_Settings.are_colliders_rendered);
 
     if (ImGui::CollapsingHeader("Other")) {
-        ImGui::ColorPicker4("Background Color", (f32*)&clear_color);
+        ImGui::ColorPicker4("Background Color", (f32*)&Sandbox_Settings.clear_color);
     }
 
     ImGui::Separator();
@@ -520,12 +389,12 @@ void draw_gui() {
 
     // test();
 
-    const f32 abs_max_speed = 30;
+    const f32 abs_max_speed = 300;
     if (Editor::selected_object != null) {
         if (ImGui::CollapsingHeader("Transform")) {
-            ImGui::SliderFloat3("Position", (f32*)(&Editor::selected_object->transform.position), -10, 10);
-            ImGui::SliderFloat4("Rotation", (f32*)(&Editor::selected_object->transform.rotation), -10, 10);
-            ImGui::SliderFloat3("Scale", (f32*)(&Editor::selected_object->transform.scale), -10, 10);
+            ImGui::SliderFloat3("Position", (f32*)(&Editor::selected_object->transform.position), -100, 100);
+            ImGui::SliderFloat4("Rotation", (f32*)(&Editor::selected_object->transform.rotation), -100, 100);
+            ImGui::SliderFloat3("Scale", (f32*)(&Editor::selected_object->transform.scale), -100, 100);
         }
         if (ImGui::CollapsingHeader("Collider")) {
             i32 item_current = (i32)Editor::selected_object->collider.type;
@@ -534,12 +403,12 @@ void draw_gui() {
 
             if (Editor::selected_object->collider.type == Collider_Type::Box_Collider2D) {
                 Box_Collider2D& collider = Editor::selected_object->collider.box_collider2d;
-                ImGui::SliderFloat2("lb", (f32*)(&collider.lb), -10, 10);
-                ImGui::SliderFloat2("rt", (f32*)(&collider.rt), -10, 10);
+                ImGui::SliderFloat2("lb", (f32*)(&collider.lb), -100, 100);
+                ImGui::SliderFloat2("rt", (f32*)(&collider.rt), -100, 100);
             } else if (Editor::selected_object->collider.type == Collider_Type::Sphere_Collider2D) {
                 Sphere_Collider2D& collider = Editor::selected_object->collider.sphere_collider2d;
-                ImGui::SliderFloat2("origin", (f32*)(&collider.origin), -10, 10);
-                ImGui::SliderFloat("radius", (f32*)(&collider.radius), -10, 10);
+                ImGui::SliderFloat2("origin", (f32*)(&collider.origin), -100, 100);
+                ImGui::SliderFloat("radius", (f32*)(&collider.radius), -100, 100);
             }
         }
         if (ImGui::CollapsingHeader("Material")) {
@@ -587,7 +456,7 @@ void draw_gui() {
 
         if (ImGui::CollapsingHeader("Physcics Data")) {
             Physics_Data& data = Editor::selected_object->physics_data;
-            ImGui::SliderFloat("Mass", (f32*)(&data.mass), 0, 10);
+            ImGui::SliderFloat("Mass", (f32*)(&data.mass), 0, 100);
             ImGui::SliderFloat2("Velocity", (f32*)(&data.velocity), -abs_max_speed, abs_max_speed);
             ImGui::Checkbox("Is Static", &data.is_static);
         }
@@ -598,9 +467,24 @@ void draw_gui() {
     }
 
 
+    static char save_file_name_buffer[100] = "save.bin";
     if (ImGui::Button("Save")) {
-        save_physics_objects("Test/Assets/save.bin");
+        char s[110] = "Saves/";
+        strcat(s, save_file_name_buffer);
+        save_physics_objects(s);
     }
+    ImGui::SameLine();
+    ImGui::InputText("Save file name", save_file_name_buffer, 100);
+
+    static char load_file_name_buffer[100] = "save.bin";
+    if (ImGui::Button("Load")) {
+        char s[110] = "Saves/";
+        strcat(s, load_file_name_buffer);
+        load_physics_objects(s);
+    }
+    ImGui::SameLine();
+    ImGui::InputText("Load file name", load_file_name_buffer, 100);
+
     ImGui::End();
 
     ImGui::Begin("Build Menu");

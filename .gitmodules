@@ -1,0 +1,3 @@
+[submodule "gpu_graphics"]
+	path = gpu_graphics
+	url = git@github.com:mbgl-git/gpu_graphics.git
