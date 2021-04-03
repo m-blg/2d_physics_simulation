@@ -1,6 +1,0 @@
-[submodule "gpu_graphics"]
-	path = gpu_graphics
-	url = https://github.com/mbgl-git/gpu_graphics.git
-[submodule "cp_lib"]
-	path = cp_lib
-	url = https://github.com/mbgl-git/cp_lib.git

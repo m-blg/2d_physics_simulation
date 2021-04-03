@@ -108,6 +108,14 @@ Camera camera = {
 
 Camera* main_camera;
 
+struct {
+    vec2f nav_mouse_init_pos;
+    vec2f nav_camera_init_pos;
+
+    bool is_moving_selected_object = false;
+    vec2f moving_selected_object_offset;
+} Mouse_Tool;
+
 
 void save_physics_objects(const char* file_name) {
     FILE* file = fopen(file_name, "wb");
@@ -202,7 +210,11 @@ void render_colliders() {
 void Editor::place_object() {
     vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
     Editor::selected_object = is_over(cursor_world_pos);
-    if (Editor::selected_object != null) return;
+    if (Editor::selected_object != null) {
+        Mouse_Tool.is_moving_selected_object = true;
+        Mouse_Tool.moving_selected_object_offset = (vec2f)selected_object->transform.position - cursor_world_pos;
+        return;
+    }
 
     if (Builder::selected_object != null) {
         Physics_Object obj = *Builder::selected_object;
@@ -280,8 +292,8 @@ void game_init() {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); 
 
-    //glEnable(GL_DEPTH_TEST);
-    //glDepthFunc(GL_LESS);
+    // glEnable(GL_DEPTH_TEST);
+    // glDepthFunc(GL_LESS);
 
     main_camera = &camera;
 
@@ -297,28 +309,42 @@ void game_shut() {
 
 void game_update() {
 
+    if (main_camera == null) return;
+
     glClearColor(Sandbox_Settings.clear_color.r, Sandbox_Settings.clear_color.g, Sandbox_Settings.clear_color.b, Sandbox_Settings.clear_color.a);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
-    if (Input::is_key_down('q')) {
-        is_running = false;
-    }
-
-    if (Input::is_key_held('w')) {
-        main_camera->transform.position += vec3f(0, 0.1, 0);
-    }
-    if (Input::is_key_held('s')) {
-        main_camera->transform.position += vec3f(0, -0.1, 0);
-    }
-    if (Input::is_key_held('a')) {
-        main_camera->transform.position += vec3f(-0.1, 0, 0);
-    }
-    if (Input::is_key_held('d')) {
-        main_camera->transform.position += vec3f(0.1, 0, 0);
-    }
-
     ImGuiIO& gui_io = ImGui::GetIO();
+
+    if (!gui_io.WantCaptureKeyboard) {
+        if (Input::is_key_down('q')) {
+            is_running = false;
+        }
+        if (Input::is_key_down('p')) {
+            is_fullscreen = !is_fullscreen;
+            if (is_fullscreen) {
+                SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                // window_size = {1920, 1080};
+            } else {
+                SDL_SetWindowFullscreen(window, 0);
+            }
+        }
+
+        if (Input::is_key_held('w')) {
+            main_camera->transform.position += vec3f(0, 0.1, 0);
+        }
+        if (Input::is_key_held('s')) {
+            main_camera->transform.position += vec3f(0, -0.1, 0);
+        }
+        if (Input::is_key_held('a')) {
+            main_camera->transform.position += vec3f(-0.1, 0, 0);
+        }
+        if (Input::is_key_held('d')) {
+            main_camera->transform.position += vec3f(0.1, 0, 0);
+        }
+    }
+
     if (!gui_io.WantCaptureMouse) {
         if (Input::is_mouse_button_down(0)) {
             Editor::place_object();
@@ -327,11 +353,32 @@ void game_update() {
             explosion_effect();
         }
 
-        if (main_camera != null) {
-            vec2f v = main_camera->pixels_per_unit;
-            f32 val = 1 + Input::mouse_wheel.y / 5.0f;
-            main_camera->pixels_per_unit = {v.x * val, v.y * val} ;
-        } 
+        // middle mouse button navigation
+        if (Input::is_mouse_button_down(1)) {
+            Mouse_Tool.nav_mouse_init_pos = screen_to_world_space(Input::mouse_position, 
+                main_camera->transform, window_size, main_camera->pixels_per_unit);
+            
+            Mouse_Tool.nav_camera_init_pos = (vec2f)main_camera->transform.position;
+        }
+        if (Input::is_mouse_button_held(1)) {
+            Transform pre_camera_transform = main_camera->transform;
+            pre_camera_transform.position = vec3f(Mouse_Tool.nav_camera_init_pos, 0);
+            vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, pre_camera_transform, window_size, main_camera->pixels_per_unit);
+            main_camera->transform.position = vec3f(Mouse_Tool.nav_camera_init_pos - (cursor_world_pos - Mouse_Tool.nav_mouse_init_pos), 0);
+        }
+
+        vec2f v = main_camera->pixels_per_unit;
+        f32 val = 1 + Input::mouse_wheel.y / 5.0f;
+        main_camera->pixels_per_unit = {v.x * val, v.y * val};
+        
+    }
+
+    if (Input::is_mouse_button_up(0)) {
+        Mouse_Tool.is_moving_selected_object = false;
+    }
+    if (Mouse_Tool.is_moving_selected_object) {
+        vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
+        Editor::selected_object->transform.position = vec3f(cursor_world_pos + Mouse_Tool.moving_selected_object_offset, 0);
     }
 
     render_quads();
