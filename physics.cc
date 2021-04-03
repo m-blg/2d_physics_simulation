@@ -55,7 +55,7 @@ struct Physics_Object {
     Material_Sprite2D material;
 };
 
-darr<Physics_Object> quads;
+darr<Physics_Object> physics_objects;
 
 
 
@@ -164,14 +164,14 @@ vec2f max_vec(vec2f v1, vec2f v2) {
 darr<Collider> world_space_collider_cache;
 
 void update_world_space_collider_cache() {
-    if (world_space_collider_cache.cap != quads.cap) {
-        world_space_collider_cache.buffer = m_ralloc(world_space_collider_cache.buffer, quads.cap);
-        world_space_collider_cache.cap = quads.cap;
+    if (world_space_collider_cache.cap != physics_objects.cap) {
+        world_space_collider_cache.buffer = m_ralloc(world_space_collider_cache.buffer, physics_objects.cap);
+        world_space_collider_cache.cap = physics_objects.cap;
     }
-    world_space_collider_cache.len = quads.len;
+    world_space_collider_cache.len = physics_objects.len;
 
     auto cache_it = begin(&world_space_collider_cache);
-    for (auto it = begin(&quads); it != end(&quads); it++, cache_it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++, cache_it++) {
         *cache_it = world_space_collider(it);
     }
 }
@@ -334,7 +334,7 @@ void resolve_collision(Physics_Object* obj1, Physics_Object *obj2, Collider *c1,
 Physics_Object* is_over(vec2f p) {
     f32 depth = INT_MIN;
     Physics_Object* po = null;
-    for (auto it = begin(&quads); it != end(&quads); it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++) {
         Collider c = world_space_collider(it);
         // vec2f local_p = p - vec2f(it->transform.position.x, it->transform.position.y);
         if (is_contained(&c, p) && it->transform.position.z > depth) {
@@ -357,7 +357,7 @@ void apply_gravity() {
 
 void physics_update() {
     // void apply_gravity();
-    for (auto it = begin(&quads); it != end(&quads); it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++) {
         // if (it->collider.type == Collider_Type::Sphere_Collider2D)
         //     it->physics_data.velocity += gravity * GTime::fixed_dt;
         it->transform.position += vec3f(it->physics_data.velocity, 0) * 0.1f * GTime::fixed_dt;
@@ -365,9 +365,9 @@ void physics_update() {
 
     update_world_space_collider_cache();
     Collider* cache_it1 = begin(&world_space_collider_cache);
-    for (auto it1 = begin(&quads); it1 != end(&quads); it1++, cache_it1++) {
+    for (auto it1 = begin(&physics_objects); it1 != end(&physics_objects); it1++, cache_it1++) {
         Collider* cache_it2 = cache_it1 + 1;
-        for (auto it2 = it1 + 1; it2 != end(&quads); it2++, cache_it2++) {
+        for (auto it2 = it1 + 1; it2 != end(&physics_objects); it2++, cache_it2++) {
             resolve_collision(it1, it2, cache_it1, cache_it2);
         }
     }

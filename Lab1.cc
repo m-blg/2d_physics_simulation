@@ -113,8 +113,8 @@ void save_physics_objects(const char* file_name) {
     FILE* file = fopen(file_name, "wb");
     fwrite(&Sandbox_Settings, sizeof(Sandbox_Settings), 1, file);
     fwrite(&camera, sizeof(Camera), 1, file);
-    fwrite(&quads.len, sizeof(u32), 1, file);
-    fwrite(quads.buffer, sizeof(Physics_Object), quads.len, file);
+    fwrite(&physics_objects.len, sizeof(u32), 1, file);
+    fwrite(physics_objects.buffer, sizeof(Physics_Object), physics_objects.len, file);
     fclose(file);
 }
 
@@ -127,9 +127,9 @@ void load_physics_objects(const char* file_name) {
     fread(&camera, sizeof(Camera), 1, file);
     u32 len;
     fread(&len, sizeof(u32), 1, file);
-    quads.init(len);
-    quads.len = len;
-    fread(quads.buffer, sizeof(Physics_Object), len, file);
+    physics_objects.init(len);
+    physics_objects.len = len;
+    fread(physics_objects.buffer, sizeof(Physics_Object), len, file);
     fclose(file);
 }
 
@@ -141,7 +141,7 @@ void render_quads() {
 
     mat4f vp_m = proj_xy_orth_matrix(window_size, main_camera->pixels_per_unit, {-1, 30}) * view_matrix(&main_camera->transform);
 
-    for (auto it = begin(&quads); it != end(&quads); it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++) {
         i32 texture_slot = 0;
         bind_texture(Assets::textures[it->material.texture_name].id, texture_slot);
 
@@ -169,7 +169,7 @@ void render_colliders() {
 
     mat4f vp_m = proj_xy_orth_matrix(window_size, main_camera->pixels_per_unit, {-1, 30}) * view_matrix(&main_camera->transform);
 
-    for (auto it = begin(&quads); it != end(&quads); it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++) {
         mat4f mvp_m;
         if (it->collider.type == Collider_Type::Box_Collider2D) {
             bind_texture(Assets::textures[2].id, texture_slot);
@@ -208,7 +208,7 @@ void Editor::place_object() {
         Physics_Object obj = *Builder::selected_object;
         obj.transform.position = {cursor_world_pos.x, cursor_world_pos.y, 0};
 
-        dpush(&quads, obj);
+        dpush(&physics_objects, obj);
     }
 }
 
@@ -216,7 +216,7 @@ void explosion_effect() {
     const f32 accel_radius = 10;
     const f32 accel_magnitude = 3000;
     vec2f cursor_world_pos = screen_to_world_space(Input::mouse_position, main_camera->transform, window_size, main_camera->pixels_per_unit);
-    for (auto it = begin(&quads); it != end(&quads); it++) {
+    for (auto it = begin(&physics_objects); it != end(&physics_objects); it++) {
         if (it->physics_data.is_static)
             continue;
 
@@ -374,14 +374,14 @@ void draw_gui() {
         ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
     
     if (ImGui::TreeNode("Physics Objects")) {
-        for (u32 i = 0; i < len(&quads); i++) {
+        for (u32 i = 0; i < len(&physics_objects); i++) {
             ImGuiTreeNodeFlags node_flags = base_flags;
-            if (&quads[i] == Editor::selected_object) {
+            if (&physics_objects[i] == Editor::selected_object) {
                 node_flags |= ImGuiTreeNodeFlags_Selected;
             }
-            ImGui::TreeNodeEx((void*)(intptr_t)(i32)i, node_flags, quads[i].name);
+            ImGui::TreeNodeEx((void*)(intptr_t)(i32)i, node_flags, physics_objects[i].name);
             if (ImGui::IsItemClicked()) {
-                Editor::selected_object = &quads[i];
+                Editor::selected_object = &physics_objects[i];
             }
         }
         ImGui::TreePop();
@@ -461,7 +461,7 @@ void draw_gui() {
             ImGui::Checkbox("Is Static", &data.is_static);
         }
         if (ImGui::Button("Delete")) {
-            remove(&quads, Editor::selected_object);
+            remove(&physics_objects, Editor::selected_object);
             Editor::selected_object = null;
         }
     }
