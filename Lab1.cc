@@ -325,7 +325,6 @@ void game_update() {
             is_fullscreen = !is_fullscreen;
             if (is_fullscreen) {
                 SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-                // window_size = {1920, 1080};
             } else {
                 SDL_SetWindowFullscreen(window, 0);
             }
