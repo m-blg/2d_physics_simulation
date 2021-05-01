@@ -135,7 +135,7 @@ void load_physics_objects(const char* file_name) {
     fread(&camera, sizeof(Camera), 1, file);
     u32 len;
     fread(&len, sizeof(u32), 1, file);
-    physics_objects.init(len);
+    init(&physics_objects, len);
     physics_objects.len = len;
     fread(physics_objects.buffer, sizeof(Physics_Object), len, file);
     fclose(file);
@@ -250,7 +250,7 @@ void game_init() {
     Input::input_init();
 
     Assets::load_shaders<1>({"Assets/Shaders/sprite.glsl"});
-    Assets::shaders[0].init(3);
+    init(&Assets::shaders[0], 3);
     add_uniform(&Assets::shaders[0], "u_mpv_mat", Type::mat4f);
     add_uniform(&Assets::shaders[0], "u_texture", Type::i32);
     add_uniform(&Assets::shaders[0], "u_color", Type::vec4f);
